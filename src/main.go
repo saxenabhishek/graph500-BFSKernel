@@ -37,8 +37,8 @@ func stream_file_on_chan(filename string, c chan string) {
 
 }
 
-func construct_graph(filename string, scale int) {
-	outDegree := make([]int, scale)
+func construct_graph(filename string, nodes int) {
+	outDegree := make([]int, nodes)
 	edges := 0
 
 	c := make(chan string)
@@ -55,14 +55,19 @@ func construct_graph(filename string, scale int) {
 		inc_degree_count(outDegree, v)
 		edges += 1
 	}
-	log.Print(outDegree, edges)
+
+	offsets := make([]int, nodes+1)
+	offsets[0] = 0
+	for i := 1; i < nodes+1; i++ {
+		offsets[i] = outDegree[i-1] + offsets[i-1]
+	}
 
 }
 
 func main() {
-	const input_file = "input_files/output8-truncated.txt"
-	const SCALE = 8
-	var nodes = int(math.Pow(2, 8))
+	const input_file = "input_files/custom_graph.txt"
+	const SCALE = 3
+	var nodes = int(math.Pow(2, SCALE))
 	log.Printf("SCALE is set to %d (%d nodes), reading from file %s", SCALE, nodes, input_file)
 	construct_graph(input_file, nodes)
 }
