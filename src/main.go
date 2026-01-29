@@ -9,15 +9,20 @@ import (
 	"strings"
 )
 
-func inc_degree_count(outDegree []int, vtx string) {
+type Edge struct {
+	u int
+	v int
+}
+
+func str2int(vtx string) int {
 	u_i, err := strconv.Atoi(vtx)
 	if err != nil {
 		log.Fatal("Invalid value in file")
 	}
-	outDegree[u_i] += 1
+	return u_i
 }
 
-func stream_file_on_chan(filename string, c chan string) {
+func stream_file_on_chan(filename string, c chan Edge) {
 	file, err := os.Open(filename)
 	if err != nil {
 		log.Fatalf("Failed to open file \n%s", err)
@@ -27,8 +32,10 @@ func stream_file_on_chan(filename string, c chan string) {
 	scn := bufio.NewScanner(file)
 
 	for scn.Scan() {
-		line := scn.Text()
-		c <- line
+		line := strings.Fields(scn.Text())
+		u, v := line[0], line[1]
+
+		c <- Edge{str2int(u), str2int(v)}
 	}
 
 	if err := scn.Err(); err != nil {
@@ -39,21 +46,19 @@ func stream_file_on_chan(filename string, c chan string) {
 
 func construct_graph(filename string, nodes int) {
 	outDegree := make([]int, nodes)
-	edges := 0
+	NoOfedges := 0
 
-	c := make(chan string)
-	go stream_file_on_chan(filename, c)
+	c_degree := make(chan Edge)
+	go stream_file_on_chan(filename, c_degree)
 
-	for line := range c {
-		edge := strings.Fields(line)
-		u, v := edge[0], edge[1]
-		if u == v {
+	for e := range c_degree {
+		if e.u == e.v {
 			log.Print("ignoring self loop")
 			continue
 		}
-		inc_degree_count(outDegree, u)
-		inc_degree_count(outDegree, v)
-		edges += 1
+		outDegree[e.u] += 1
+		outDegree[e.v] += 1
+		NoOfedges += 1
 	}
 
 	offsets := make([]int, nodes+1)
@@ -61,7 +66,6 @@ func construct_graph(filename string, nodes int) {
 	for i := 1; i < nodes+1; i++ {
 		offsets[i] = outDegree[i-1] + offsets[i-1]
 	}
-
 }
 
 func main() {
