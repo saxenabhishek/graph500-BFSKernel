@@ -14,6 +14,13 @@ type Edge struct {
 	v int
 }
 
+type CSRGraph struct {
+	N         int // vertices
+	M         int // undirected edges
+	Offsets   []int
+	Neighbors []int // length 2*M
+}
+
 func str2int(vtx string) int {
 	u_i, err := strconv.Atoi(vtx)
 	if err != nil {
@@ -44,27 +51,58 @@ func stream_file_on_chan(filename string, c chan Edge) {
 
 }
 
-func construct_graph(filename string, nodes int) {
+func construct_graph(filename string, nodes int) CSRGraph {
 	outDegree := make([]int, nodes)
-	NoOfedges := 0
+	NoOfEdges := 0
 
 	c_degree := make(chan Edge)
 	go stream_file_on_chan(filename, c_degree)
 
 	for e := range c_degree {
 		if e.u == e.v {
-			log.Print("ignoring self loop")
 			continue
 		}
-		outDegree[e.u] += 1
-		outDegree[e.v] += 1
-		NoOfedges += 1
+		outDegree[e.u]++
+		outDegree[e.v]++
+		NoOfEdges++
 	}
 
 	offsets := make([]int, nodes+1)
 	offsets[0] = 0
 	for i := 1; i < nodes+1; i++ {
 		offsets[i] = outDegree[i-1] + offsets[i-1]
+	}
+
+	// size of length twice of all edges
+	neighbors := make([]int, offsets[nodes])
+
+	// temp copy for use in next step
+	next := make([]int, nodes)
+	copy(next, offsets[:nodes])
+
+	c_Edges := make(chan Edge)
+	go stream_file_on_chan(filename, c_Edges)
+
+	for e := range c_Edges {
+		if e.u == e.v {
+			continue
+		}
+
+		neighbors[next[e.u]] = e.v
+		next[e.u]++
+
+		neighbors[next[e.v]] = e.u
+		next[e.v]++
+	}
+
+	log.Println(neighbors)
+	log.Println(offsets)
+
+	return CSRGraph{
+		N:         nodes,
+		M:         NoOfEdges,
+		Offsets:   offsets,
+		Neighbors: neighbors,
 	}
 }
 
