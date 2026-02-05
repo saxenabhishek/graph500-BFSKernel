@@ -2,9 +2,9 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"log"
-	"math"
 	"math/rand"
 	"os"
 	"strconv"
@@ -188,39 +188,19 @@ func run_bfs_benchmark(g CSRGraph, roots []int) {
 	stR := stats(teps)
 	hmean := harmonic_mean(teps)
 
-	fmt.Println("========== Graph500 BFS Benchmark ==========")
-	fmt.Printf("BFS runs          : %d\n", NBFS)
-	fmt.Println()
+	fmt.Println("scale,nbfs,metric,min,median,max,mean,stddev")
 
-	fmt.Println("---- BFS Time (sec) ----")
-	fmt.Printf("min      : %f\n", stT.Min)
-	fmt.Printf("q1       : %f\n", stT.Q1)
-	fmt.Printf("median   : %f\n", stT.Median)
-	fmt.Printf("q3       : %f\n", stT.Q3)
-	fmt.Printf("max      : %f\n", stT.Max)
-	fmt.Printf("mean     : %f\n", stT.Mean)
-	fmt.Printf("stddev   : %f\n", stT.Stddev)
-	fmt.Println()
+	// BFS time (seconds)
+	fmt.Printf("%d,bfs_time_sec,%.6e,%.6e,%.6e,%.6e,%.6e\n",
+		NBFS, stT.Min, stT.Median, stT.Max, stT.Mean, stT.Stddev)
 
-	fmt.Println("---- BFS Traversed Edges (edges) ----")
-	fmt.Printf("min      : %f\n", stE.Min)
-	fmt.Printf("q1       : %f\n", stE.Q1)
-	fmt.Printf("median   : %f\n", stE.Median)
-	fmt.Printf("q3       : %f\n", stE.Q3)
-	fmt.Printf("max      : %f\n", stE.Max)
-	fmt.Printf("mean     : %f\n", stE.Mean)
-	fmt.Printf("stddev   : %f\n", stE.Stddev)
-	fmt.Println()
+	// BFS traversed edges
+	fmt.Printf("%d,bfs_nedge,%.0f,%.0f,%.0f,%.0f,%.0f\n",
+		NBFS, stE.Min, stE.Median, stE.Max, stE.Mean, stE.Stddev)
 
-	fmt.Println("---- BFS Performance (TEPS) ----")
-	fmt.Printf("min              : %e\n", stR.Min)
-	fmt.Printf("q1               : %e\n", stR.Q1)
-	fmt.Printf("median           : %e\n", stR.Median)
-	fmt.Printf("q3               : %e\n", stR.Q3)
-	fmt.Printf("max              : %e\n", stR.Max)
-	fmt.Printf("harmonic mean    : %e\n", hmean)
-
-	fmt.Println("============================================")
+	// BFS TEPS
+	fmt.Printf("%d,bfs_teps,%.6e,%.6e,%.6e,%.6e,0\n",
+		NBFS, stR.Min, stR.Median, stR.Max, hmean)
 }
 
 func sample_roots(g CSRGraph, NBFS int, seed int64) []int {
@@ -241,13 +221,50 @@ func sample_roots(g CSRGraph, NBFS int, seed int64) []int {
 }
 
 func main() {
-	const input_file = "/Users/as712/Projects/graph500-BFSKernel/input_files/output16.txt"
-	const SCALE = 16
-	var nodes = int(math.Pow(2, SCALE))
-	log.Printf("SCALE is set to %d (%d nodes), reading from file %s", SCALE, nodes, input_file)
+	var (
+		scale int
+		file  string
+	)
+
+	// --- 1. Command-line flags ---
+	flag.IntVar(&scale, "scale", -1, "Graph scale (N = 2^scale)")
+	flag.StringVar(&file, "file", "", "Path to edge list file")
+	flag.Parse()
+
+	// --- 2. Environment variables fallback ---
+	if scale < 0 {
+		if s := os.Getenv("SCALE"); s != "" {
+			v, err := strconv.Atoi(s)
+			if err != nil {
+				log.Fatalf("Invalid SCALE env var: %v", err)
+			}
+			scale = v
+		}
+	}
+
+	if file == "" {
+		file = os.Getenv("GRAPH_FILE")
+	}
+
+	// --- 3. Validate inputs ---
+	if scale < 0 {
+		log.Fatal("Scale must be provided via --scale or SCALE env var")
+	}
+	if file == "" {
+		log.Fatal("Input file must be provided via --file or GRAPH_FILE env var")
+	}
+
+	nodes := 1 << scale
+
+	log.Printf(
+		"SCALE=%d (%d nodes), reading from file %s",
+		scale, nodes, file,
+	)
+
+	log.Printf("SCALE is set to %d (%d nodes), reading from file %s", scale, nodes, file)
 
 	t0 := time.Now()
-	g := construct_graph(input_file, nodes)
+	g := construct_graph(file, nodes)
 	dt := time.Since(t0).Seconds()
 	fmt.Printf("construction_time: %20.17e\n", dt)
 
