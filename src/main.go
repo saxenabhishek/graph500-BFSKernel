@@ -2,28 +2,17 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
-
-type Edge struct {
-	u int
-	v int
-}
-
-type CSRGraph struct {
-	N         int // vertices
-	M         int // undirected edges
-	Deg       []int
-	Offsets   []int
-	Neighbors []int
-}
 
 func str2int(vtx string) int {
 	u_i, err := strconv.Atoi(vtx)
@@ -36,7 +25,7 @@ func str2int(vtx string) int {
 func stream_file_on_chan(filename string, c chan Edge) {
 	file, err := os.Open(filename)
 	if err != nil {
-		log.Fatalf("Failed to open file \n%s", err)
+		log.Fatalf("Failed to open file\n%s", err)
 	}
 	defer file.Close()
 	defer close(c)
@@ -44,15 +33,11 @@ func stream_file_on_chan(filename string, c chan Edge) {
 
 	for scn.Scan() {
 		line := strings.Fields(scn.Text())
-		u, v := line[0], line[1]
-
-		c <- Edge{str2int(u), str2int(v)}
+		c <- Edge{str2int(line[0]), str2int(line[1])}
 	}
-
 	if err := scn.Err(); err != nil {
-		log.Fatalf("Failed to scan file \n%s", err)
+		log.Fatalf("Failed to scan file\n%s", err)
 	}
-
 }
 
 func construct_graph(filename string, nodes int) CSRGraph {
@@ -72,8 +57,7 @@ func construct_graph(filename string, nodes int) CSRGraph {
 	}
 
 	offsets := make([]int, nodes+1)
-	offsets[0] = 0
-	for i := 1; i < nodes+1; i++ {
+	for i := 1; i <= nodes; i++ {
 		offsets[i] = outDegree[i-1] + offsets[i-1]
 	}
 
@@ -122,8 +106,7 @@ func bfs_kernel2(g CSRGraph, root int, parent []int, q []int, reached []int) ([]
 		v := q[head]
 		head++
 
-		start, end := g.Offsets[v], g.Offsets[v+1]
-		for i := start; i < end; i++ {
+		for i := g.Offsets[v]; i < g.Offsets[v+1]; i++ {
 			u := g.Neighbors[i]
 			if parent[u] == -1 {
 				parent[u] = v
@@ -144,7 +127,14 @@ func count_edges_reached(g CSRGraph, reached []int) float64 {
 	return float64(sum) / 2.0
 }
 
-func run_bfs_benchmark(g CSRGraph, roots []int) {
+func run_bfs_benchmark(
+	g CSRGraph,
+	roots []int,
+	scale int,
+	edgeFactor int,
+	constructTime float64,
+	writer *bufio.Writer,
+) {
 	NBFS := len(roots)
 
 	parent := make([]int, g.N)
@@ -158,49 +148,85 @@ func run_bfs_benchmark(g CSRGraph, roots []int) {
 	nedges := make([]float64, 0, NBFS)
 	teps := make([]float64, 0, NBFS)
 
-	for _, root := range roots {
-		// time BFS
+	enc := json.NewEncoder(writer)
+
+	for i, root := range roots {
 		t0 := time.Now()
 		_, reached = bfs_kernel2(g, root, parent, q, reached)
 		dt := time.Since(t0).Seconds()
 
-		times = append(times, dt)
 		nedge := count_edges_reached(g, reached)
-		// compute metrics
-
-		// if dt is near 0
 		tepsVal := 0.0
 		if dt > 0 {
 			tepsVal = nedge / dt
 		}
 
-		teps = append(teps, tepsVal)
+		times = append(times, dt)
 		nedges = append(nedges, nedge)
+		teps = append(teps, tepsVal)
 
-		// reset parent
+		// Write one run record
+		rec := RunRecord{
+			Type:       "run",
+			Scale:      scale,
+			EdgeFactor: edgeFactor,
+			RunIndex:   i,
+			Root:       root,
+			TimeS:      dt,
+			Nedge:      nedge,
+			TEPS:       tepsVal,
+		}
+		if err := enc.Encode(rec); err != nil {
+			log.Printf("Warning: failed to write run record: %v", err)
+		}
+
+		// Reset parent array
 		for _, v := range reached {
 			parent[v] = -1
 		}
 	}
 
+	// Write summary record
 	stT := stats(times)
 	stE := stats(nedges)
 	stR := stats(teps)
-	hmean := harmonic_mean(teps)
 
-	fmt.Println("scale,nbfs,metric,min,median,max,mean,stddev")
+	summary := SummaryRecord{
+		Type:           "summary",
+		Scale:          scale,
+		EdgeFactor:     edgeFactor,
+		Nodes:          g.N,
+		TotalEdges:     g.M,
+		NBFS:           NBFS,
+		ConstructTimeS: constructTime,
 
-	// BFS time (seconds)
-	fmt.Printf("%d,bfs_time_sec,%.6e,%.6e,%.6e,%.6e,%.6e\n",
-		NBFS, stT.Min, stT.Median, stT.Max, stT.Mean, stT.Stddev)
+		TimeMin:    stT.Min,
+		TimeMedian: stT.Median,
+		TimeMax:    stT.Max,
+		TimeMean:   stT.Mean,
+		TimeStddev: stT.Stddev,
 
-	// BFS traversed edges
-	fmt.Printf("%d,bfs_nedge,%.0f,%.0f,%.0f,%.0f,%.0f\n",
-		NBFS, stE.Min, stE.Median, stE.Max, stE.Mean, stE.Stddev)
+		NedgeMin:    stE.Min,
+		NedgeMedian: stE.Median,
+		NedgeMax:    stE.Max,
+		NedgeMean:   stE.Mean,
+		NedgeStddev: stE.Stddev,
 
-	// BFS TEPS
-	fmt.Printf("%d,bfs_teps,%.6e,%.6e,%.6e,%.6e,0\n",
-		NBFS, stR.Min, stR.Median, stR.Max, hmean)
+		TEPSMin:      stR.Min,
+		TEPSMedian:   stR.Median,
+		TEPSMax:      stR.Max,
+		TEPSHarmonic: harmonic_mean(teps),
+	}
+
+	if err := enc.Encode(summary); err != nil {
+		log.Printf("Warning: failed to write summary record: %v", err)
+	}
+
+	writer.Flush()
+
+	// print summary to stdout for visibility
+	fmt.Printf("[DONE] scale=%d ef=%d  harmonic_TEPS=%.4e  median_time=%.4es\n",
+		scale, edgeFactor, summary.TEPSHarmonic, stT.Median)
 }
 
 func sample_roots(g CSRGraph, NBFS int, seed int64) []int {
@@ -220,18 +246,21 @@ func sample_roots(g CSRGraph, NBFS int, seed int64) []int {
 	return cands
 }
 
-func main() {
+func getConfig() (int, int, string, string) {
 	var (
-		scale int
-		file  string
+		scale      int
+		edgeFactor int
+		file       string
+		outFile    string
 	)
 
-	// --- 1. Command-line flags ---
 	flag.IntVar(&scale, "scale", -1, "Graph scale (N = 2^scale)")
+	flag.IntVar(&edgeFactor, "ef", 16, "Average edges per vertex (edge factor)")
 	flag.StringVar(&file, "file", "", "Path to edge list file")
+	flag.StringVar(&outFile, "out", "", "Path to JSONL output file (overrides OUT_FILE env)")
 	flag.Parse()
 
-	// --- 2. Environment variables fallback ---
+	// Environment variable fallbacks
 	if scale < 0 {
 		if s := os.Getenv("SCALE"); s != "" {
 			v, err := strconv.Atoi(s)
@@ -241,35 +270,62 @@ func main() {
 			scale = v
 		}
 	}
-
+	if edgeFactor == 16 {
+		if s := os.Getenv("EDGE_FACTOR"); s != "" {
+			v, err := strconv.Atoi(s)
+			if err != nil {
+				log.Fatalf("Invalid EDGE_FACTOR env var: %v", err)
+			}
+			edgeFactor = v
+		}
+	}
 	if file == "" {
 		file = os.Getenv("GRAPH_FILE")
 	}
+	if outFile == "" {
+		outFile = os.Getenv("OUT_FILE")
+	}
+	if outFile == "" {
+		outFile = "output/results.jsonl"
+	}
 
-	// --- 3. Validate inputs ---
+	// Validate
 	if scale < 0 {
 		log.Fatal("Scale must be provided via --scale or SCALE env var")
 	}
 	if file == "" {
 		log.Fatal("Input file must be provided via --file or GRAPH_FILE env var")
 	}
+	return scale, edgeFactor, file, outFile
+}
+
+func main() {
+	scale, edgeFactor, file, outFile := getConfig()
 
 	nodes := 1 << scale
+	log.Printf("SCALE=%d (%d nodes), EF=%d, reading from %s", scale, nodes, edgeFactor, file)
+	log.Printf("Output will be written to: %s", outFile)
 
-	log.Printf(
-		"SCALE=%d (%d nodes), reading from file %s",
-		scale, nodes, file,
-	)
+	// Create output directory if needed
+	if dir := filepath.Dir(outFile); dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Fatalf("Failed to create output directory: %v", err)
+		}
+	}
 
-	log.Printf("SCALE is set to %d (%d nodes), reading from file %s", scale, nodes, file)
+	f, err := os.OpenFile(outFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Failed to open output file: %v", err)
+	}
+	defer f.Close()
+	writer := bufio.NewWriter(f)
 
+	// Construct graph
 	t0 := time.Now()
 	g := construct_graph(file, nodes)
-	dt := time.Since(t0).Seconds()
-	fmt.Printf("construction_time: %20.17e\n", dt)
+	constructTime := time.Since(t0).Seconds()
+	log.Printf("Graph constructed in %.4fs  (N=%d, M=%d)", constructTime, g.N, g.M)
 
 	roots := sample_roots(g, 64, 49)
-
-	run_bfs_benchmark(g, roots)
-
+	run_bfs_benchmark(g, roots, scale, edgeFactor, constructTime, writer)
 }
