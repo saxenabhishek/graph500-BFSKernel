@@ -39,6 +39,6 @@ pkg
 
 output
 
-plots
-
 __pycache__
+
+graphs

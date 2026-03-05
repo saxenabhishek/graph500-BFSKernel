@@ -13,8 +13,8 @@ import argparse
 import json
 from pathlib import Path
 
+import matplotlib
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 
 from plots import (
@@ -27,6 +27,8 @@ from plots import (
     plot_time_vs_scale,
 )
 
+
+matplotlib.use("Agg")
 plt.rcParams.update(
     {
         "figure.dpi": 150,
@@ -58,7 +60,7 @@ def load_jsonl(path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     return runs_df, summ_df
 
 
-# ── Summary table ─────────────────────────────────────────────────────────────
+# ── Summary table
 
 
 def print_summary_table(summ: pd.DataFrame):
