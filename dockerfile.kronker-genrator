@@ -1,0 +1,41 @@
+# ── Graph500 Kronecker Graph Generator ───────────────────────────────────────
+# Two-stage build: compile on ubuntu, run on debian:slim.
+#
+# Runtime env vars:
+#   SCALE        – graph scale (N = 2^SCALE)
+#   EDGE_FACTOR  – average edges per vertex
+#   OUT_DIR      – output directory (default /graphs, mount a host dir here)
+
+# ── Stage 1: build ───────────────────────────────────────────────────────────
+FROM ubuntu:22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    git \
+    make \
+    g++ \
+    libomp-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+RUN git clone https://github.com/RapidsAtHKUST/Graph500KroneckerGraphGenerator.git
+
+WORKDIR /build/Graph500KroneckerGraphGenerator
+RUN make all
+
+# ── Stage 2: minimal runtime ─────────────────────────────────────────────────
+FROM debian:12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/Graph500KroneckerGraphGenerator/generator_omp /usr/local/bin/generator_omp
+
+RUN mkdir -p /graphs
+
+ENV OUT_DIR=/graphs
+
+ENTRYPOINT ["/bin/sh", "-c", \
+  "generator_omp ${SCALE} -e ${EDGE_FACTOR} -o ${OUT_DIR}/graph_s${SCALE}_ef${EDGE_FACTOR}.txt"]
