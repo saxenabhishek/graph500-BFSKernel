@@ -1,19 +1,27 @@
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 from pathlib import Path
-from utils import sci, label, nodes
-import numpy as np
+from utils import sci, label
+
+sns.set_theme(style="whitegrid", palette="tab10", font_scale=1.1)
 
 
 def plot_teps_vs_scale(summ: pd.DataFrame, outdir: Path):
     """Harmonic-mean TEPS vs graph scale, one line per edge factor."""
     fig, ax = plt.subplots(figsize=(8, 5))
 
-    for ef, grp in summ.groupby("edge_factor"):
-        grp = grp.sort_values("scale")
-        ax.plot(grp["scale"], grp["teps_harmonic_mean"], marker="o", label=f"EF={ef}")
+    sns.lineplot(
+        data=summ.sort_values("scale"),
+        x="scale",
+        y="teps_harmonic_mean",
+        hue="edge_factor",
+        marker="o",
+        ax=ax,
+    )
 
-    ax.set_xlabel("Scale (log₂ vertices)")
+    ax.set_xlabel("Scale (log2 vertices)")
     ax.set_ylabel("Harmonic-Mean TEPS")
     ax.set_title("Graph500 — TEPS vs Scale")
     ax.legend(title="Edge Factor")
@@ -30,21 +38,25 @@ def plot_teps_box(runs: pd.DataFrame, outdir: Path):
         print("  [skip] No per-run data for box plot.")
         return
 
-    configs = runs.assign(
+    df = runs.assign(
         config=runs.apply(lambda r: label(int(r.scale), int(r.edge_factor)), axis=1)
     )
-    order = sorted(configs["config"].unique())
-
-    data = [configs[configs["config"] == c]["teps"].values for c in order]
+    order = sorted(df["config"].unique())
 
     fig, ax = plt.subplots(figsize=(max(6, len(order) * 1.4), 5))
-    ax.boxplot(
-        data,
-        labels=order,
-        patch_artist=True,
-        boxprops=dict(facecolor="#aec6e8", color="#333"),
-        medianprops=dict(color="crimson", linewidth=2),
+
+    sns.boxplot(
+        data=df,
+        x="config",
+        y="teps",
+        order=order,
+        hue="config",
+        palette="tab10",
+        linewidth=1.2,
+        flierprops=dict(marker=".", markersize=4, alpha=0.5),
+        ax=ax,
     )
+
     ax.set_xlabel("Configuration (Scale / Edge Factor)")
     ax.set_ylabel("TEPS per BFS run")
     ax.set_title("TEPS Distribution per Configuration")
@@ -77,10 +89,11 @@ def plot_time_vs_scale(summ: pd.DataFrame, outdir: Path):
             label=f"EF={ef}",
         )
 
-    ax.set_xlabel("Scale (log₂ vertices)")
+    ax.set_xlabel("Scale (log2 vertices)")
     ax.set_ylabel("Median BFS Time (s)")
     ax.set_title("BFS Time vs Scale")
     ax.legend(title="Edge Factor")
+    sns.despine()
     fig.tight_layout()
     fig.savefig(outdir / "time_vs_scale.png")
     plt.close(fig)
@@ -89,12 +102,19 @@ def plot_time_vs_scale(summ: pd.DataFrame, outdir: Path):
 
 def plot_nedge_vs_scale(summ: pd.DataFrame, outdir: Path):
     """Median edges traversed vs number of vertices."""
+    df = summ.copy()
+    df["n_vertices"] = df["scale"].apply(lambda s: 2**s)
+
     fig, ax = plt.subplots(figsize=(8, 5))
 
-    for ef, grp in summ.groupby("edge_factor"):
-        grp = grp.sort_values("scale")
-        n_vertices = grp["scale"].apply(nodes)
-        ax.plot(n_vertices, grp["nedge_median"], marker="^", label=f"EF={ef}")
+    sns.lineplot(
+        data=df.sort_values("n_vertices"),
+        x="n_vertices",
+        y="nedge_median",
+        hue="edge_factor",
+        marker="^",
+        ax=ax,
+    )
 
     ax.set_xlabel("Number of Vertices (2^scale)")
     ax.set_ylabel("Median Edges Traversed")
@@ -116,11 +136,16 @@ def plot_construct_time(summ: pd.DataFrame, outdir: Path):
 
     fig, ax = plt.subplots(figsize=(8, 5))
 
-    for ef, grp in summ.groupby("edge_factor"):
-        grp = grp.sort_values("scale")
-        ax.plot(grp["scale"], grp["construct_time_s"], marker="D", label=f"EF={ef}")
+    sns.lineplot(
+        data=summ.sort_values("scale"),
+        x="scale",
+        y="construct_time_s",
+        hue="edge_factor",
+        marker="D",
+        ax=ax,
+    )
 
-    ax.set_xlabel("Scale (log₂ vertices)")
+    ax.set_xlabel("Scale (log2 vertices)")
     ax.set_ylabel("Construction Time (s)")
     ax.set_title("CSR Graph Construction Time vs Scale")
     ax.legend(title="Edge Factor")
@@ -141,13 +166,21 @@ def plot_teps_heatmap(summ: pd.DataFrame, outdir: Path):
     fig, ax = plt.subplots(
         figsize=(max(5, len(pivot.columns) * 1.5), max(4, len(pivot) * 0.8))
     )
-    im = ax.imshow(pivot.values, aspect="auto", cmap="YlOrRd")
-    ax.set_xticks(range(len(pivot.columns)))
-    ax.set_xticklabels([f"EF={c}" for c in pivot.columns])
-    ax.set_yticks(range(len(pivot.index)))
-    ax.set_yticklabels([f"S={s}" for s in pivot.index])
-    ax.set_title("Harmonic-Mean TEPS Heatmap (Scale × Edge Factor)")
-    plt.colorbar(im, ax=ax, label="TEPS")
+
+    sns.heatmap(
+        pivot,
+        annot=True,
+        fmt=".2e",
+        cmap="YlOrRd",
+        linewidths=0.5,
+        cbar_kws={"label": "TEPS"},
+        ax=ax,
+    )
+
+    ax.set_xlabel("Edge Factor")
+    ax.set_ylabel("Scale")
+    # Wrap long title and pad so it doesn't clip
+    ax.set_title("Harmonic-Mean TEPS\n(Scale × Edge Factor)", pad=12)
     fig.tight_layout()
     fig.savefig(outdir / "teps_heatmap.png")
     plt.close(fig)
@@ -159,10 +192,10 @@ def plot_run_timeline(runs: pd.DataFrame, outdir: Path):
     if runs.empty:
         return
 
-    configs = runs.assign(
+    df = runs.assign(
         config=runs.apply(lambda r: label(int(r.scale), int(r.edge_factor)), axis=1)
     )
-    unique = sorted(configs["config"].unique())
+    unique = sorted(df["config"].unique())
     n = len(unique)
 
     fig, axes = plt.subplots(n, 1, figsize=(10, 3 * n), sharex=True)
@@ -170,10 +203,13 @@ def plot_run_timeline(runs: pd.DataFrame, outdir: Path):
         axes = [axes]
 
     for ax, cfg in zip(axes, unique):
-        sub = configs[configs["config"] == cfg].sort_values("run_index")
-        ax.plot(sub["run_index"], sub["teps"], marker=".", linewidth=0.8)
+        sub = df[df["config"] == cfg].sort_values("run_index")
+        sns.lineplot(
+            data=sub, x="run_index", y="teps", marker=".", linewidth=0.8, ax=ax
+        )
         ax.set_ylabel("TEPS")
         ax.set_title(f"Config {cfg}")
+        ax.set_xlabel("")
         sci(ax)
 
     axes[-1].set_xlabel("BFS Run Index")
