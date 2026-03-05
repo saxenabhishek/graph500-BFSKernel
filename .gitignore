@@ -38,3 +38,7 @@ pkg
 .DS_Store
 
 output
+
+plots
+
+__pycache__
