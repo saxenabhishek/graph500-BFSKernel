@@ -9,8 +9,10 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -92,12 +94,13 @@ func construct_graph(filename string, nodes int) CSRGraph {
 	}
 }
 
-func bfs_kernel2(g CSRGraph, root int, parent []int, q []int, reached []int) ([]int, []int) {
+func bfs_kernel2(g CSRGraph, root int, parent []int, q []int, reached []int) ([]int, []int, float64) {
 	reached = reached[:0]
 
 	parent[root] = root
 	reached = append(reached, root)
 
+	edgeSum := g.Deg[root]
 	head, tail := 0, 0
 	q[tail] = root
 	tail++
@@ -113,10 +116,11 @@ func bfs_kernel2(g CSRGraph, root int, parent []int, q []int, reached []int) ([]
 				reached = append(reached, u)
 				q[tail] = u
 				tail++
+				edgeSum += g.Deg[u]
 			}
 		}
 	}
-	return parent, reached
+	return parent, reached, float64(edgeSum) / 2.0
 }
 
 func count_edges_reached(g CSRGraph, reached []int) float64 {
@@ -137,53 +141,66 @@ func run_bfs_benchmark(
 ) {
 	NBFS := len(roots)
 
-	parent := make([]int, g.N)
-	for i := range parent {
-		parent[i] = -1
-	}
-	q := make([]int, g.N)
-	reached := make([]int, 0, g.N)
+	times := make([]float64, NBFS)
+	nedges := make([]float64, NBFS)
+	teps := make([]float64, NBFS)
 
-	times := make([]float64, 0, NBFS)
-	nedges := make([]float64, 0, NBFS)
-	teps := make([]float64, 0, NBFS)
-
-	enc := json.NewEncoder(writer)
+	resultCh := make(chan bfsResult, NBFS)
+	sem := make(chan struct{}, runtime.NumCPU())
+	var wg sync.WaitGroup
 
 	for i, root := range roots {
-		t0 := time.Now()
-		_, reached = bfs_kernel2(g, root, parent, q, reached)
-		dt := time.Since(t0).Seconds()
+		wg.Add(1)
+		go func(i, root int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
-		nedge := count_edges_reached(g, reached)
-		tepsVal := 0.0
-		if dt > 0 {
-			tepsVal = nedge / dt
-		}
+			parent := make([]int, g.N)
+			for j := range parent {
+				parent[j] = -1
+			}
+			q := make([]int, g.N)
+			reached := make([]int, 0, g.N)
+			nedge := 0.0
 
-		times = append(times, dt)
-		nedges = append(nedges, nedge)
-		teps = append(teps, tepsVal)
+			t0 := time.Now()
+			_, reached, nedge = bfs_kernel2(g, root, parent, q, reached)
+			dt := time.Since(t0).Seconds()
 
-		// Write one run record
+			tepsVal := 0.0
+			if dt > 0 {
+				tepsVal = nedge / dt
+			}
+
+			resultCh <- bfsResult{i, root, dt, nedge, tepsVal}
+		}(i, root)
+	}
+
+	go func() { wg.Wait(); close(resultCh) }()
+
+	results := make([]bfsResult, NBFS)
+	for r := range resultCh {
+		results[r.index] = r
+	}
+
+	enc := json.NewEncoder(writer)
+	for _, r := range results {
+		times[r.index] = r.timeS
+		nedges[r.index] = r.nedge
+		teps[r.index] = r.teps
+
 		rec := RunRecord{
 			Type:       "run",
 			Scale:      scale,
 			EdgeFactor: edgeFactor,
-			RunIndex:   i,
-			Root:       root,
-			TimeS:      dt,
-			Nedge:      nedge,
-			TEPS:       tepsVal,
+			RunIndex:   r.index,
+			Root:       r.root,
+			TimeS:      r.timeS,
+			Nedge:      r.nedge,
+			TEPS:       r.teps,
 		}
-		if err := enc.Encode(rec); err != nil {
-			log.Printf("Warning: failed to write run record: %v", err)
-		}
-
-		// Reset parent array
-		for _, v := range reached {
-			parent[v] = -1
-		}
+		enc.Encode(rec)
 	}
 
 	// Write summary record
@@ -239,11 +256,12 @@ func sample_roots(g CSRGraph, NBFS int, seed int64) []int {
 		}
 	}
 
-	r.Shuffle(len(cands), func(i, j int) { cands[i], cands[j] = cands[j], cands[i] })
-	if len(cands) > NBFS {
-		cands = cands[:NBFS]
+	for i := 0; i < NBFS && i < len(cands); i++ {
+		j := i + r.Intn(len(cands)-i)
+		cands[i], cands[j] = cands[j], cands[i]
 	}
-	return cands
+
+	return cands[:NBFS]
 }
 
 func getConfig() (int, int, string, string) {

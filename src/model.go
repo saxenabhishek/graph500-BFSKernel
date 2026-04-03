@@ -50,3 +50,11 @@ type SummaryRecord struct {
 	TEPSMax      float64 `json:"teps_max"`
 	TEPSHarmonic float64 `json:"teps_harmonic_mean"`
 }
+
+type bfsResult struct {
+	index int
+	root  int
+	timeS float64
+	nedge float64
+	teps  float64
+}
