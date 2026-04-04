@@ -6,8 +6,8 @@
 set -euo pipefail
 
 
-Customise the SCALES and EDGE_FACTORS arrays below.
-SCALES=(23)
+# Customise the SCALES and EDGE_FACTORS arrays below.
+SCALES=(24)
 EDGE_FACTORS=(8 16)
 
 GRAPHS_DIR="$(pwd)/graphs"
@@ -87,4 +87,4 @@ echo " Results: $OUTPUT_DIR/results.jsonl"
 echo "════════════════════════════════════════"
 
 cd analytics/
-uv run main.py --input /Users/as712/Projects/graph500-BFSKernel/output/results.jsonl
+uv run main.py --input $OUTPUT_DIR/results.jsonl
